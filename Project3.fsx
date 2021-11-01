@@ -19,10 +19,10 @@ type Message =
     
 
 let system = System.create "chord-system" (Configuration.defaultConfig())
+printfn "%A" (Environment.GetCommandLineArgs())
 
-let k = 6
-let numRequests = 16
-let numNodes = 4000
+let numNodes = Environment.GetCommandLineArgs().[2] |> int
+let numRequests = Environment.GetCommandLineArgs().[3] |> int
 let chordSize = numNodes * 16
 let mutable chord : IActorRef[] = [|for i in 0 .. chordSize -> null|]
 let m = Math.Log(chordSize |> float, 2.0) |> ceil |> int
@@ -52,7 +52,9 @@ let Counter(mailbox: Actor<_>) =
 
             match msg with
             | IncreaseCounter(hops) -> totalHops <- totalHops + (hops |> float)
-            | ReturnAverage -> printfn "%f" (totalHops/totalRequests)
+            | ReturnAverage -> printfn "Average Hops = %f" (totalHops/totalRequests)
+                               system.Terminate() |> ignore
+            | _ -> printfn "Wrong message"
             return! loop(count+1)
         }
     loop(0)
@@ -87,27 +89,18 @@ let Node(mailbox: Actor<_>) =
 
                                      fingerTable <- List.sortWith (fun a b -> compare (hash b) (hash a)) fingerTable
                                      
-                                     //let ft = fingerTable |> List.map(fun x -> hash(x))
-                                     //printfn "FingerTable[%d]=%A" x ft
+
                                      
 
             | FindSuccessor(node,i) -> 
                                      
                                      let id = hash(node)
-                                     //printfn "Finding successor from %d %d" (hash mailbox.Self) (hash node)
                                      if id >= hash(mailbox.Self) && id <= hash(successor) then
-                                        //printfn "The successor of %d is %d" id (hash successor)
-                                        //printfn "The predecessor of %d is %d" id (hash predecessor)
                                         printfn "Hops[%d]=%d" id i
                                         counter <! IncreaseCounter(i)
                                         
                                      else
-                                        
-                                        //printfn "FingerTable[%d]=" (hash(mailbox.Self))
-                                        //fingerTable |> List.iter (fun x -> printfn "%d" (hash x))
-                                        //printfn "Looking for: %d" id
                                         let index, jumpNode = fingerTable |> List.indexed |> List.find(fun (i,x) -> id >= hash(x) || i = fingerTable.Length-1)
-                                        //printfn "%d Jumping to %d" (hash mailbox.Self) (hash jumpNode)
                                         jumpNode <! FindSuccessor(node,i+1)                                                                                               
                                         
             | Join(node) -> let id = hash(node)
@@ -119,31 +112,28 @@ let Node(mailbox: Actor<_>) =
                                 node <! AssignSuccessor(mailbox.Self)
 
                             elif id > hash(mailbox.Self) && id <= hash(successor) then
-                                //printfn "%d case 2" id
                                 node <! AssignSuccessor(successor)
                                 node <! AssignPredecessor(mailbox.Self)
                                 successor <! AssignPredecessor(node)
                                 successor <- node
 
                             elif id > hash(mailbox.Self) && hash(successor) <= hash(mailbox.Self) then
-                                //printfn "%d case 3" id
                                 node <! AssignSuccessor(successor)
                                 node <! AssignPredecessor(mailbox.Self)
                                 successor <! AssignPredecessor(node)
                                 successor <- node
 
                             elif id > hash(mailbox.Self) && id > hash(successor) then
-                                //printfn "%d case 4 %d" id (hash successor)
                                 successor <! Join(node)
 
                             elif id < hash(mailbox.Self) then
-                                //printfn "%d case 5 %d" id (hash mailbox.Self)
                                 node <! AssignSuccessor(mailbox.Self)
                                 node <! AssignPredecessor(predecessor)
                                 predecessor <! AssignSuccessor(node)
                                 predecessor <- node
 
             | PrintChord(s) ->  printfn " %d %d %d" (hash(predecessor)) (hash(mailbox.Self)) (hash(successor))
+            | _ -> ()
 
             return! loop (count+1)
         }
@@ -158,11 +148,11 @@ let nodes = [for i=2 to numNodes do yield spawn system $"N{i}" Node]
 nodes
 |> List.iter(fun n -> chord.[hash(n)] <- n)
 
-printfn "%A" chord
+
 
 printfn "Joining nodes wait..."
 nodes
-|> List.iter (fun n ->  Async.Sleep(100) |> Async.RunSynchronously
+|> List.iter (fun n ->  Async.Sleep(50) |> Async.RunSynchronously
                         nodeRef1 <! Join(n))
 printfn "Joined all nodes"
 
